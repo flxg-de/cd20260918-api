@@ -1,0 +1,246 @@
+openapi: 3.0.3
+info:
+  title: Community Day Talk Scheduling API
+  description: |
+    API zur Verwaltung von Vortrags-Einreichungen und deren Zuordnung zu
+    Slots am Community Day.
+  version: 1.0.0
+servers:
+  - url: /api/v1
+
+tags:
+  - name: talks
+    description: Vortrags-Einreichungen
+  - name: slots
+    description: Verfügbare Zeit-Slots und deren Belegung
+
+paths:
+  /talks:
+    get:
+      tags: [talks]
+      operationId: listTalks
+      summary: Alle eingereichten Talks auflisten
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TalkStatus'
+      responses:
+        '200':
+          description: Liste der Talks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Talk'
+    post:
+      tags: [talks]
+      operationId: createTalk
+      summary: Neuen Talk einreichen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TalkCreateRequest'
+      responses:
+        '201':
+          description: Talk wurde angelegt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Talk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /talks/{talkId}:
+    parameters:
+      - name: talkId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [talks]
+      operationId: getTalk
+      summary: Einen Talk per ID abrufen
+      responses:
+        '200':
+          description: Der Talk
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Talk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [talks]
+      operationId: updateTalk
+      summary: Talk aktualisieren
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TalkCreateRequest'
+      responses:
+        '200':
+          description: Aktualisierter Talk
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Talk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [talks]
+      operationId: deleteTalk
+      summary: Talk löschen
+      responses:
+        '204':
+          description: Gelöscht
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /talks/{talkId}/assignment:
+    parameters:
+      - name: talkId
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      tags: [talks]
+      operationId: assignTalkToSlot
+      summary: Talk einem Slot zuordnen (oder Zuordnung aufheben)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignmentRequest'
+      responses:
+        '200':
+          description: Aktualisierter Talk
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Talk'
+        '409':
+          description: Slot-Konflikt (bereits belegt oder Kapazität überschritten)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /slots:
+    get:
+      tags: [slots]
+      operationId: listSlots
+      summary: Alle Slots inkl. zugeordneter Talks
+      responses:
+        '200':
+          description: Liste der Slots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Slot'
+
+components:
+  responses:
+    NotFound:
+      description: Ressource nicht gefunden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    BadRequest:
+      description: Ungültige Anfrage
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    TalkStatus:
+      type: string
+      enum: [SUBMITTED, ASSIGNED, REJECTED]
+
+    TalkCreateRequest:
+      type: object
+      required: [title, speaker, durationMinutes]
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 120
+        speaker:
+          type: string
+          minLength: 2
+          maxLength: 80
+        description:
+          type: string
+          maxLength: 2000
+        durationMinutes:
+          type: integer
+          minimum: 5
+          maximum: 120
+
+    Talk:
+      allOf:
+        - $ref: '#/components/schemas/TalkCreateRequest'
+        - type: object
+          required: [id, status]
+          properties:
+            id:
+              type: string
+            status:
+              $ref: '#/components/schemas/TalkStatus'
+            slotId:
+              type: string
+              nullable: true
+
+    AssignmentRequest:
+      type: object
+      properties:
+        slotId:
+          type: string
+          nullable: true
+          description: null hebt eine bestehende Zuordnung auf
+
+    Slot:
+      type: object
+      required: [id, room, startTime, endTime, capacityMinutes]
+      properties:
+        id:
+          type: string
+        room:
+          type: string
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        capacityMinutes:
+          type: integer
+        talks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Talk'
+
+    Problem:
+      type: object
+      properties:
+        title:
+          type: string
+        detail:
+          type: string
+        status:
+          type: integer
