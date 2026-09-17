@@ -125,6 +125,30 @@ paths:
                 $ref: '#/components/schemas/CommunityDay'
         '404':
           $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [community-days]
+      operationId: updateCommunityDay
+      summary: Stammdaten des Community Day bearbeiten (Titel, Datum, Fristen)
+      description: Nur für Organisatoren.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommunityDayUpdateRequest'
+      responses:
+        '200':
+          description: Aktualisierter Community Day
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommunityDay'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /community-days/{communityDayId}/transition-to-planning:
     parameters:
@@ -151,6 +175,34 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: Community Day ist bereits in der Planungsphase oder abgeschlossen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /community-days/{communityDayId}/transition-to-published:
+    parameters:
+      - $ref: '#/components/parameters/CommunityDayId'
+    post:
+      tags: [community-days]
+      operationId: transitionToPublished
+      summary: Programm veröffentlichen (Planungs- in Veröffentlichungsphase wechseln)
+      description: |
+        Nur für Organisatoren. Beendet die Planung und macht das Programm für
+        alle sichtbar (Programm-Ansicht, Favoriten/"Mein Tag"). Nicht umkehrbar.
+      responses:
+        '200':
+          description: Community Day befindet sich jetzt in der Veröffentlichungsphase
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommunityDay'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Community Day ist nicht in der Planungsphase
           content:
             application/json:
               schema:
@@ -199,6 +251,12 @@ paths:
           in: query
           required: false
           description: Nur eigene Talks des angemeldeten Referenten
+          schema:
+            type: boolean
+        - name: favorite
+          in: query
+          required: false
+          description: Nur vom angemeldeten Nutzer favorisierte Talks ("Mein Tag")
           schema:
             type: boolean
       security: []
@@ -370,6 +428,73 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Problem'
+
+  /talks/{talkId}/vote:
+    parameters:
+      - $ref: '#/components/parameters/TalkId'
+    post:
+      tags: [talks]
+      operationId: voteForTalk
+      summary: Interessestimme für einen Talk abgeben
+      description: Ein Nutzer kann pro Talk höchstens einmal abstimmen.
+      responses:
+        '200':
+          description: Aktualisierter Talk
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Talk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Nutzer hat bereits für diesen Talk abgestimmt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    delete:
+      tags: [talks]
+      operationId: removeVoteForTalk
+      summary: Eigene Interessestimme für einen Talk zurückziehen
+      responses:
+        '200':
+          description: Aktualisierter Talk
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Talk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /talks/{talkId}/favorite:
+    parameters:
+      - $ref: '#/components/parameters/TalkId'
+    post:
+      tags: [talks]
+      operationId: favoriteTalk
+      summary: Talk zu "Mein Tag" hinzufügen
+      responses:
+        '200':
+          description: Aktualisierter Talk
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Talk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [talks]
+      operationId: unfavoriteTalk
+      summary: Talk aus "Mein Tag" entfernen
+      responses:
+        '200':
+          description: Aktualisierter Talk
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Talk'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /talks/{talkId}/rejection:
     parameters:
@@ -691,11 +816,13 @@ components:
   schemas:
     CommunityDayPhase:
       type: string
-      enum: [SUBMISSION, PLANNING, COMPLETED]
+      enum: [SUBMISSION, PLANNING, PUBLISHED, COMPLETED]
       description: >
         SUBMISSION: Einreichungsphase. PLANNING: Planungsphase (Slots und
-        Zeitfenster werden angelegt, Talks zugeordnet). COMPLETED:
-        Durchführung ist abgeschlossen und nur noch als Historie einsehbar.
+        Zeitfenster werden angelegt, Talks zugeordnet). PUBLISHED: Programm
+        ist veröffentlicht (Programm-Ansicht und Favoriten/"Mein Tag" sind
+        sichtbar). COMPLETED: Durchführung ist abgeschlossen und nur noch
+        als Historie einsehbar.
 
     CommunityDayCreateRequest:
       type: object
@@ -711,6 +838,39 @@ components:
         date:
           type: string
           format: date
+        submissionDeadline:
+          type: string
+          format: date-time
+          nullable: true
+          description: Einsendeschluss für reguläre Einreichungen.
+        lateSubmissionDeadline:
+          type: string
+          format: date-time
+          nullable: true
+          description: Letzter Termin für Nachreichungen während der Planungsphase.
+
+    CommunityDayUpdateRequest:
+      type: object
+      description: Teilaktualisierung der Stammdaten; nicht gesetzte Felder bleiben unverändert.
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        date:
+          type: string
+          format: date
+        submissionDeadline:
+          type: string
+          format: date-time
+          nullable: true
+        lateSubmissionDeadline:
+          type: string
+          format: date-time
+          nullable: true
 
     CommunityDay:
       allOf:
@@ -799,6 +959,18 @@ components:
             rejectionReason:
               type: string
               nullable: true
+            votes:
+              type: integer
+              default: 0
+              description: Anzahl der Interessestimmen.
+            votedByMe:
+              type: boolean
+              default: false
+              description: Ob der angemeldete Nutzer bereits für diesen Talk abgestimmt hat.
+            favoritedByMe:
+              type: boolean
+              default: false
+              description: Ob der angemeldete Nutzer diesen Talk zu "Mein Tag" hinzugefügt hat.
             teamsLink:
               type: string
               nullable: true
