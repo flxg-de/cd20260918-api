@@ -35,6 +35,7 @@ paths:
       tags: [community-days]
       operationId: listCommunityDays
       summary: Alle Community Days auflisten (inkl. Historie)
+      security: []
       responses:
         '200':
           description: Liste der Community Days
@@ -78,6 +79,7 @@ paths:
       description: >
         Liefert den Community Day, für den Einreichung bzw. Planung aktuell
         offen ist.
+      security: []
       responses:
         '200':
           description: Der aktuelle Community Day
@@ -95,6 +97,7 @@ paths:
       tags: [community-days]
       operationId: getCommunityDay
       summary: Einen Community Day per ID abrufen
+      security: []
       responses:
         '200':
           description: Der Community Day
@@ -157,6 +160,7 @@ paths:
           description: Nur eigene Talks des angemeldeten Referenten
           schema:
             type: boolean
+      security: []
       responses:
         '200':
           description: Liste der Talks
@@ -200,6 +204,7 @@ paths:
       tags: [talks]
       operationId: getTalk
       summary: Einen Talk per ID abrufen
+      security: []
       responses:
         '200':
           description: Der Talk
@@ -378,6 +383,7 @@ paths:
           required: false
           schema:
             $ref: '#/components/schemas/Location'
+      security: []
       responses:
         '200':
           description: Liste der Slots
@@ -417,6 +423,7 @@ paths:
       tags: [slots]
       operationId: getSlot
       summary: Einen Slot per ID abrufen
+      security: []
       responses:
         '200':
           description: Der Slot
