@@ -3,31 +3,41 @@ info:
   title: Community Day Slot Manager API
   description: |
     API zur Verwaltung von Community Days, Vortrags-Einreichungen (Talks) und
-    deren Zuordnung zu Zeit-Slots.
+    deren Zuordnung zu Slots.
 
-    ## Tagesraster: Slots × Zeitfenster
+    ## Tagesraster: Slots × Zeit
 
     Der Tagesablauf wird als Tabelle gedacht (siehe interne Confluence-Seite):
     Spalten sind **Slots** — benannte, über den ganzen Tag laufende Tracks/
     Swimlanes (z. B. "Amt für gute Ideen", "Neuland"), inkl. Raum, Standort
-    und Format. Zeilen sind **Zeitfenster** (`TimeBlock`) mit Start-/Endzeit,
-    z. B. 10:00–11:00. Ein Talk wird konkret der **Zelle** aus Slot ×
-    Zeitfenster zugeordnet (Assignment).
+    und Format. Die Zeit ist **swimlane-übergreifend durchgängig** und nicht
+    in vorab angelegte, gemeinsame Zeitfenster unterteilt: Jeder Talk trägt
+    seine eigene `startTime` und `durationMinutes` und kann unabhängig von
+    den Talks in anderen Slots platziert werden. So passen z. B. in Slot 1
+    zwischen 9 und 12 Uhr drei 45-minütige Vorträge (mit vom Organisator
+    eingeplanten Pausen), während im selben Zeitraum in Slot 2 fünf kürzere
+    Vorträge stattfinden. Pausen/Puffer zwischen Talks sind nicht Teil des
+    Datenmodells, sondern liegen in der Verantwortung der Organisatoren beim
+    Platzieren (zwei Talks dürfen direkt ohne Lücke aneinandergereiht
+    werden). Für die Übersichtsdarstellung (`/schedule`) wird serverseitig
+    ein einheitliches 15-Minuten-Zeilenraster erzeugt; dieses Raster ist rein
+    eine Darstellungshilfe und keine eigene Entität.
 
-    Manche Zeitfenster gehören zum festen Tagesablauf (Frühstück, regionale
-    Slots, Vorstellung, Mittagspause, Geschäftsführungs-Slot) und gelten
-    slot-/track-übergreifend für den ganzen Tag; sie sind für freie
-    Talk-Zuordnung gesperrt (`locked: true`) und benötigen keinen Slot.
+    Manche Programmpunkte gehören zum festen Tagesablauf (Frühstück,
+    regionale Slots, Vorstellung, Mittagspause, Geschäftsführungs-Slot) und
+    gelten slot-/track-übergreifend für den ganzen Tag. Sie werden als Talks
+    mit `isFixedProgram: true` und `slotId: null` abgebildet und sind für
+    die reguläre Slot-Zuordnung nicht verfügbar.
 
     Ein Community Day durchläuft zwei Phasen:
       1. **Einreichungsphase** (`SUBMISSION`): Talks werden eingereicht,
-         Slots/Zeitfenster existieren noch nicht oder nicht vollständig.
-      2. **Planungsphase** (`PLANNING`): Organisatoren legen Slots und
-         Zeitfenster an und ordnen Talks den Zellen zu.
+         Slots existieren noch nicht oder nicht vollständig.
+      2. **Planungsphase** (`PLANNING`): Organisatoren legen Slots an und
+         ordnen Talks per Slot + Startzeit ein.
 
-    Alle Talk-, Slot- und Zeitfenster-Operationen beziehen sich implizit auf
-    den jeweils aktuellen Community Day, sofern nicht explizit ein anderer
-    (historischer) Community Day referenziert wird.
+    Alle Talk- und Slot-Operationen beziehen sich implizit auf den jeweils
+    aktuellen Community Day, sofern nicht explizit ein anderer (historischer)
+    Community Day referenziert wird.
   version: 3.0.0
 servers:
   - url: /api/v1
@@ -39,10 +49,8 @@ tags:
     description: Vortrags-Einreichungen
   - name: slots
     description: Benannte Tracks/Swimlanes (Spalten des Tagesrasters)
-  - name: time-blocks
-    description: Zeitfenster des Tages (Zeilen des Tagesrasters), inkl. fester Tagesablauf-Blöcke
   - name: schedule
-    description: Kombinierte Tagesübersicht (Slots × Zeitfenster × zugeordnete Talks)
+    description: Kombinierte Tagesübersicht (Slots × 15-Minuten-Zeilenraster × zugeordnete Talks)
 
 security:
   - bearerAuth: []
@@ -70,7 +78,8 @@ paths:
       description: |
         Nur für Organisatoren. Legt automatisch einen Vorschlag für den
         festen Tagesablauf (Frühstück, regionale Slots, Vorstellung,
-        Mittagspause, Geschäftsführungs-Slot) als gesperrte Zeitfenster an.
+        Mittagspause, Geschäftsführungs-Slot) als Talks mit
+        `isFixedProgram: true` und `slotId: null` an.
       requestBody:
         required: true
         content:
@@ -214,11 +223,17 @@ paths:
     get:
       tags: [schedule]
       operationId: getSchedule
-      summary: Kombinierte Tagesübersicht (Slots × Zeitfenster × Talks)
+      summary: Kombinierte Tagesübersicht (Slots × 15-Minuten-Raster × Talks)
       description: >
-        Entspricht der tabellarischen Tagesübersicht: alle Slots (Spalten),
-        alle Zeitfenster (Zeilen) und je Zelle der dort zugeordnete Talk,
-        sofern vorhanden. Grundlage für Planungsansicht und Kalender-UI.
+        Entspricht der tabellarischen Tagesübersicht: alle Slots (Spalten)
+        und ein serverseitig aus den platzierten Talks abgeleitetes
+        Zeilenraster in 15-Minuten-Schritten. Eine `ScheduleCell` wird nur in
+        der Zeile geführt, in der der jeweilige Talk beginnt, inkl.
+        `rowSpan` (Anzahl 15-Minuten-Zeilen, die er einnimmt); die
+        Folgezeilen enthalten für diesen Slot keine eigene Zelle (analog zu
+        einem HTML-`rowspan`). Fixe, slotübergreifende Programmpunkte
+        (`isFixedProgram: true`) erscheinen je Zeile als `programItem` statt
+        als `cells`-Eintrag. Grundlage für Planungsansicht und Kalender-UI.
       security: []
       responses:
         '200':
@@ -396,15 +411,21 @@ paths:
     put:
       tags: [talks]
       operationId: assignTalkToSlot
-      summary: Talk einer Slot/Zeitfenster-Zelle zuordnen (oder Zuordnung aufheben)
+      summary: Talk einem Slot zu einer Startzeit zuordnen (oder Zuordnung aufheben)
       description: |
-        Nur für Organisatoren, nur während der Planungsphase. Beim Zuordnen
-        wird geprüft, ob das Zeitfenster für Talk-Zuordnung freigegeben ist
-        (nicht `locked`, z. B. kein Frühstücks- oder Mittagspausen-Block),
-        ob die Zelle (Slot + Zeitfenster) noch frei ist, und ob das
-        Zeitfenster ausreichend Kapazität für die Dauer des Talks hat. Bei
-        einem Konflikt wird die bestehende Zuordnung nicht stillschweigend
-        überschrieben, sondern die Anfrage mit `409` abgelehnt.
+        Nur für Organisatoren, nur während der Planungsphase. `slotId` und
+        `startTime` müssen gemeinsam gesetzt werden (die Dauer ergibt sich
+        aus `durationMinutes` des Talks); beide `null` hebt eine bestehende
+        Zuordnung auf. Es wird geprüft, ob der Ziel-Slot für Talk-Zuordnung
+        verfügbar ist (kein `isFixedProgram`-Talk) und ob sich der
+        Talk-Zeitraum mit einem bereits im selben Slot zugeordneten Talk
+        zeitlich überschneidet. Ein direktes, pausenloses Aneinanderreihen
+        zweier Talks (Ende des einen = Start des nächsten) gilt nicht als
+        Überschneidung. Puffer-/Pausenzeiten zwischen Talks werden nicht
+        automatisch erzwungen, sondern liegen in der Verantwortung der
+        Organisatoren. Bei einem Konflikt wird die bestehende Zuordnung
+        nicht stillschweigend überschrieben, sondern die Anfrage mit `409`
+        abgelehnt.
       requestBody:
         required: true
         content:
@@ -423,7 +444,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Konflikt (Zeitfenster gesperrt, Zelle bereits belegt oder Kapazität überschritten)
+          description: Konflikt (Slot ist ein fester Programmpunkt oder Zeitraum überschneidet sich mit einem anderen Talk im selben Slot)
           content:
             application/json:
               schema:
@@ -631,8 +652,8 @@ paths:
       operationId: deleteSlot
       summary: Slot löschen
       description: >
-        Nur für Organisatoren. Ein Slot mit noch bestehenden Talk-Zuordnungen
-        in irgendeinem Zeitfenster kann nicht gelöscht werden.
+        Nur für Organisatoren. Ein Slot mit noch zugeordneten Talks kann
+        nicht gelöscht werden.
       responses:
         '204':
           description: Gelöscht
@@ -642,118 +663,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: Slot hat noch zugeordnete Talks
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-
-  /time-blocks:
-    get:
-      tags: [time-blocks]
-      operationId: listTimeBlocks
-      summary: Alle Zeitfenster des aktuellen Community Day auflisten
-      parameters:
-        - name: communityDayId
-          in: query
-          required: false
-          description: Optional ein historischer Community Day statt des aktuellen
-          schema:
-            type: string
-      security: []
-      responses:
-        '200':
-          description: Liste der Zeitfenster
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/TimeBlock'
-    post:
-      tags: [time-blocks]
-      operationId: createTimeBlock
-      summary: Neues Zeitfenster anlegen
-      description: >
-        Nur für Organisatoren. Für einen neuen Community Day wird das feste
-        Tagesablauf-Grundgerüst (Frühstück, regionale Slots, Vorstellung,
-        Mittagspause, Geschäftsführungs-Slot) bereits automatisch als
-        gesperrte Zeitfenster vorgeschlagen; hierüber lassen sich weitere
-        (reguläre oder zusätzliche gesperrte) Zeitfenster ergänzen.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TimeBlockCreateRequest'
-      responses:
-        '201':
-          description: Zeitfenster wurde angelegt
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TimeBlock'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-
-  /time-blocks/{timeBlockId}:
-    parameters:
-      - $ref: '#/components/parameters/TimeBlockId'
-    get:
-      tags: [time-blocks]
-      operationId: getTimeBlock
-      summary: Ein Zeitfenster per ID abrufen
-      security: []
-      responses:
-        '200':
-          description: Das Zeitfenster
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TimeBlock'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    put:
-      tags: [time-blocks]
-      operationId: updateTimeBlock
-      summary: Zeitfenster aktualisieren (z. B. Zeiten verschieben)
-      description: Nur für Organisatoren.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TimeBlockCreateRequest'
-      responses:
-        '200':
-          description: Aktualisiertes Zeitfenster
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TimeBlock'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    delete:
-      tags: [time-blocks]
-      operationId: deleteTimeBlock
-      summary: Zeitfenster löschen
-      description: >
-        Nur für Organisatoren. Ein Zeitfenster mit noch bestehenden
-        Talk-Zuordnungen kann nicht gelöscht werden.
-      responses:
-        '204':
-          description: Gelöscht
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: Zeitfenster hat noch zugeordnete Talks
           content:
             application/json:
               schema:
@@ -782,12 +691,6 @@ components:
         type: string
     SlotId:
       name: slotId
-      in: path
-      required: true
-      schema:
-        type: string
-    TimeBlockId:
-      name: timeBlockId
       in: path
       required: true
       schema:
@@ -932,6 +835,14 @@ components:
           type: array
           items:
             type: string
+        isFixedProgram:
+          type: boolean
+          default: false
+          description: >
+            true für feste, slotübergreifende Tagesablauf-Punkte (Frühstück,
+            regionale Slots, Vorstellung, Mittagspause,
+            Geschäftsführungs-Slot). Solche Talks haben immer `slotId: null`
+            und sind für die reguläre Slot-Zuordnung nicht verfügbar.
 
     Talk:
       allOf:
@@ -951,11 +862,21 @@ components:
             slotId:
               type: string
               nullable: true
-              description: Track/Spalte, der der Talk zugeordnet ist
-            timeBlockId:
+              description: >
+                Track/Spalte, der der Talk zugeordnet ist. Immer `null` bei
+                `isFixedProgram: true` (spannt swimlane-übergreifend über den
+                ganzen Tag).
+            startTime:
               type: string
+              format: date-time
               nullable: true
-              description: Zeitfenster/Zeile, dem der Talk zugeordnet ist
+              description: >
+                Startzeitpunkt des Talks. Die Endzeit ergibt sich aus
+                `startTime + durationMinutes`. Frei wählbar innerhalb des
+                Community-Day-Zeitfensters und unabhängig von den Startzeiten
+                in anderen Slots; Pausen/Puffer zu benachbarten Talks im
+                selben Slot müssen von den Organisatoren selbst eingeplant
+                werden.
             rejectionReason:
               type: string
               nullable: true
@@ -981,14 +902,16 @@ components:
     AssignmentRequest:
       type: object
       description: >
-        Zum Zuordnen müssen `slotId` und `timeBlockId` gemeinsam gesetzt
-        werden; beide `null` hebt eine bestehende Zuordnung auf.
+        Zum Zuordnen müssen `slotId` und `startTime` gemeinsam gesetzt
+        werden; beide `null` hebt eine bestehende Zuordnung auf. Die Dauer
+        ergibt sich aus `durationMinutes` des Talks.
       properties:
         slotId:
           type: string
           nullable: true
-        timeBlockId:
+        startTime:
           type: string
+          format: date-time
           nullable: true
 
     SlotCreateRequest:
@@ -1019,9 +942,27 @@ components:
             communityDayId:
               type: string
 
-    TimeBlockCreateRequest:
+    ScheduleCell:
       type: object
-      required: [startTime, endTime]
+      required: [slotId, talk, rowSpan]
+      description: >
+        Nur in der Zeile vorhanden, in der `talk` beginnt. Für Slots, die in
+        dieser Zeile von einem in einer früheren Zeile begonnenen Talk
+        belegt sind, gibt es keinen Eintrag (analog zu einem
+        HTML-`rowspan`).
+      properties:
+        slotId:
+          type: string
+        talk:
+          $ref: '#/components/schemas/Talk'
+        rowSpan:
+          type: integer
+          minimum: 1
+          description: Anzahl 15-Minuten-Zeilen, die der Talk einnimmt.
+
+    ScheduleRow:
+      type: object
+      required: [startTime, endTime, cells]
       properties:
         startTime:
           type: string
@@ -1029,55 +970,30 @@ components:
         endTime:
           type: string
           format: date-time
-        label:
-          type: string
-          description: Bezeichnung, z. B. "Mittagspause" bei gesperrten Zeitfenstern.
-        locked:
-          type: boolean
-          default: false
-          description: >
-            true für feste Tagesablauf-Blöcke (Frühstück, regionale Slots,
-            Vorstellung, Mittagspause, Geschäftsführungs-Slot). Diese gelten
-            slotübergreifend für den ganzen Tag und sind für freie
-            Talk-Zuordnung gesperrt.
-
-    TimeBlock:
-      allOf:
-        - $ref: '#/components/schemas/TimeBlockCreateRequest'
-        - type: object
-          required: [id, communityDayId]
-          properties:
-            id:
-              type: string
-            communityDayId:
-              type: string
-
-    ScheduleCell:
-      type: object
-      required: [slotId]
-      properties:
-        slotId:
-          type: string
-        talk:
+          description: Immer `startTime + 15 Minuten`.
+        cells:
+          type: array
+          description: Nur Zellen für Slots, in denen hier ein Talk beginnt.
+          items:
+            $ref: '#/components/schemas/ScheduleCell'
+        programItem:
           type: object
           nullable: true
+          description: >
+            Fester, slotübergreifender Programmpunkt (`isFixedProgram:
+            true`), sofern einer in dieser Zeile beginnt.
           allOf:
             - $ref: '#/components/schemas/Talk'
-
-    ScheduleRow:
-      allOf:
-        - $ref: '#/components/schemas/TimeBlock'
-        - type: object
-          properties:
-            cells:
-              type: array
-              description: Leer/nicht gesetzt bei gesperrten, slotübergreifenden Zeitfenstern.
-              items:
-                $ref: '#/components/schemas/ScheduleCell'
+            - type: object
+              required: [rowSpan]
+              properties:
+                rowSpan:
+                  type: integer
+                  minimum: 1
 
     Schedule:
       type: object
-      required: [communityDayId, slots, timeBlocks]
+      required: [communityDayId, slots, rows]
       properties:
         communityDayId:
           type: string
@@ -1085,8 +1001,9 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Slot'
-        timeBlocks:
+        rows:
           type: array
+          description: Serverseitig generiertes 15-Minuten-Zeilenraster.
           items:
             $ref: '#/components/schemas/ScheduleRow'
 
